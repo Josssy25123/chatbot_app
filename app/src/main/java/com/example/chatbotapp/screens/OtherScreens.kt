@@ -355,12 +355,17 @@ fun ProfileContent(
     modifier: Modifier = Modifier,
     onLogout: () -> Unit = {}
 ) {
+    val authService = remember { AuthService() }
+    val firestore = remember { FirebaseFirestore.getInstance() }
+    val storage = remember { FirebaseStorage.getInstance() }
+    val scope = rememberCoroutineScope()
+
     var userProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var showLogoutDialog by remember { mutableStateOf(false) }
-
-    val authService = remember { AuthService() }
-    val scope = rememberCoroutineScope()
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var exportInProgress by remember { mutableStateOf(false) }
 
     // Load user profile
     LaunchedEffect(Unit) {
@@ -375,11 +380,7 @@ fun ProfileContent(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         if (isLoading) {
-            // Loading state
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         } else {
@@ -392,125 +393,206 @@ fun ProfileContent(
                     modifier = Modifier.padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Profile avatar
+                    // Profile avatar using Coil
+                    val painter = rememberAsyncImagePainter(
+                        model = userProfile?.profileImageUrl ?: "",
+                        placeholder = painterResource(android.R.drawable.sym_def_app_icon),
+                        error = painterResource(android.R.drawable.sym_def_app_icon)
+                    )
+
                     Card(
-                        modifier = Modifier.size(80.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer
-                        )
+                        modifier = Modifier
+                            .size(100.dp)
+                            .clickable { showEditDialog = true },
+                        shape = CircleShape,
+                        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.primaryContainer)
                     ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            Icon(
-                                Icons.Filled.AccountCircle,
-                                contentDescription = "Profile",
-                                modifier = Modifier.size(50.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
+                        Image(
+                            painter = painter,
+                            contentDescription = "Profile picture",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
-
-                    // User name
                     Text(
                         text = userProfile?.fullName ?: "User",
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold
-                        )
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                     )
-
-                    // User email
                     Text(
-                        text = userProfile?.email ?: "user@example.com",
+                        text = userProfile?.email ?: "",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // User ID badge
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = MaterialTheme.shapes.small
-                    ) {
-                        Text(
-                            text = "Member since ${java.text.SimpleDateFormat("MMM yyyy").format(java.util.Date())}",
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    }
                 }
             }
 
-            // Settings items
-            val settingsItems = listOf(
-                SettingsItem("Edit Profile", Icons.Filled.Edit),
-                SettingsItem("Notifications", Icons.Filled.Notifications),
-                SettingsItem("Privacy & Security", Icons.Filled.Security),
-                SettingsItem("Help & Support", Icons.Filled.Help),
-                SettingsItem("About", Icons.Filled.Info)
+            // Settings actions
+            val settings = listOf(
+                Triple("Edit Profile", Icons.Filled.Edit) { showEditDialog = true },
+                Triple("Export Chats", Icons.Filled.FileDownload) {
+                    scope.launch {
+                        exportInProgress = true
+                        exportChatData(firestore)
+                        exportInProgress = false
+                    }
+                },
+                Triple("Clear All Chats", Icons.Filled.DeleteSweep) {
+                    scope.launch { clearAllChats(firestore) }
+                },
+                Triple("Delete Account", Icons.Filled.DeleteForever) { showDeleteDialog = true },
+                Triple("Sign Out", Icons.Filled.ExitToApp) { showLogoutDialog = true }
             )
 
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                items(settingsItems) { settingsItem ->
-                    SettingsCard(
-                        title = settingsItem.title,
-                        icon = settingsItem.icon,
-                        onClick = {
-                            // Handle settings item clicks
-                        }
-                    )
-                }
-
-                // Logout item - separate and styled differently
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    SettingsCard(
-                        title = "Sign Out",
-                        icon = Icons.Filled.ExitToApp,
-                        onClick = { showLogoutDialog = true },
-                        isDestructive = true
-                    )
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(settings) { (title, icon, action) ->
+                    SettingsCard(title = title, icon = icon, onClick = action)
                 }
             }
         }
     }
 
-    // Logout confirmation dialog
+    // Export loading dialog
+    if (exportInProgress) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Exporting Data") },
+            text = { Text("Preparing your chat data for export...") },
+            confirmButton = {}
+        )
+    }
+
+    // Edit profile dialog
+    if (showEditDialog) {
+        EditProfileDialog(
+            userProfile = userProfile,
+            storage = storage,
+            authService = authService,
+            onDismiss = { showEditDialog = false },
+            onUpdated = { updated -> userProfile = updated }
+        )
+    }
+
+    // Delete confirmation dialog
+    if (showDeleteDialog) {
+        ConfirmDeleteDialog(
+            onConfirm = {
+                scope.launch {
+                    deleteAccount(authService, firestore, storage)
+                    onLogout()
+                }
+            },
+            onDismiss = { showDeleteDialog = false }
+        )
+    }
+
+    // Logout confirmation
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
             title = { Text("Sign Out") },
-            text = { Text("Are you sure you want to sign out of your account?") },
+            text = { Text("Are you sure you want to sign out?") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        authService.signOut()
-                        showLogoutDialog = false
-                        onLogout()
-                    }
-                ) {
-                    Text("Sign Out", color = MaterialTheme.colorScheme.error)
-                }
+                TextButton(onClick = {
+                    authService.signOut()
+                    showLogoutDialog = false
+                    onLogout()
+                }) { Text("Sign Out", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = {
-                TextButton(onClick = { showLogoutDialog = false }) {
-                    Text("Cancel")
-                }
-            }
+            dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Cancel") } }
         )
     }
 }
 
-// Data class for settings items
-data class SettingsItem(
-    val title: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector
-)
+@Composable
+fun EditProfileDialog(
+    userProfile: UserProfile?,
+    storage: FirebaseStorage,
+    authService: AuthService,
+    onDismiss: () -> Unit,
+    onUpdated: (UserProfile) -> Unit
+) {
+    var fullName by remember { mutableStateOf(userProfile?.fullName ?: "") }
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Launcher for image picker
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        imageUri = uri
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Profile") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Preview selected or existing avatar
+                val painter = rememberAsyncImagePainter(
+                    model = imageUri ?: userProfile?.profileImageUrl,
+                    placeholder = painterResource(android.R.drawable.sym_def_app_icon),
+                    error = painterResource(android.R.drawable.sym_def_app_icon)
+                )
+                Card(
+                    modifier = Modifier
+                        .size(90.dp)
+                        .clickable { imagePickerLauncher.launch("image/*") },
+                    shape = CircleShape,
+                    colors = CardDefaults.cardColors(MaterialTheme.colorScheme.primaryContainer)
+                ) {
+                    Image(
+                        painter = painter,
+                        contentDescription = "Profile picture preview",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
+                OutlinedTextField(
+                    value = fullName,
+                    onValueChange = { fullName = it },
+                    label = { Text("Full Name") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "Tap avatar to change profile photo",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        val imageUrl =
+                            if (imageUri != null) uploadImageToStorage(storage, imageUri!!)
+                            else userProfile?.profileImageUrl ?: ""
+                        authService.updateUserProfile(fullName, imageUrl)
+                        val updated = userProfile?.copy(fullName = fullName, profileImageUrl = imageUrl)
+                        if (updated != null) onUpdated(updated)
+                        onDismiss()
+                    }
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+
 
 @Composable
 fun SettingsCard(

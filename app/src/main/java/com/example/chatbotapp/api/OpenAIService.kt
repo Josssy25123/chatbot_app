@@ -15,6 +15,10 @@ import com.example.chatbotapp.data.ChatMessage
 import com.google.firebase.auth.FirebaseAuth // Import for getting the cu
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldPath
+import com.example.chatbotapp.models.Message
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 
 
 class OpenAIService {
@@ -22,11 +26,11 @@ class OpenAIService {
     private val apiKey = ""
     private val client = OkHttpClient()
     private val db = FirebaseFirestore.getInstance()
-    private val TAG = "OpenAIService"
+    private val tag = "OpenAIService"
 
     private val contextCache = mutableMapOf<String, Pair<String, Long>>()
     private val embeddingCache = mutableMapOf<String, List<Double>>()
-    private val CACHE_DURATION = 10 * 60 * 1000L
+    private val cacheDuration = 10 * 60 * 1000L
     // Helper to get the current user ID
     private val currentUserId: String?
         get() = FirebaseAuth.getInstance().currentUser?.uid
@@ -113,10 +117,10 @@ class OpenAIService {
             // 3. Add the new message to the 'messages' subcollection
             chatRef.collection("messages").add(newMessage).await()
 
-            Log.d(TAG, "Chat session and message saved successfully.")
+            Log.d(tag, "Chat session and message saved successfully.")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Error saving chat update: ${e.message}")
+            Log.e(tag, "Error saving chat update: ${e.message}")
             false
         }
     }
@@ -169,7 +173,7 @@ class OpenAIService {
             fetchedSessions
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching chat sessions: ${e.message}")
+            Log.e(tag, "Error fetching chat sessions: ${e.message}")
             emptyList()
         }
     }
@@ -282,7 +286,7 @@ class OpenAIService {
                 if (q.contains(variation)) {
                     val rolePattern = Regex("(?:who is|what is|find|get|contact).{0,20}(?:the )?$variation")
                     if (rolePattern.find(q) != null) {
-                        Log.d(TAG, "🎯 ROLE QUERY detected: $role")
+                        Log.d(tag, "🎯 ROLE QUERY detected: $role")
                         return QueryAnalysis(
                             intent = QueryIntent.ROLE_QUERY,
                             roleKeyword = role,
@@ -296,14 +300,14 @@ class OpenAIService {
         // Check for person name queries
         val personName = extractPersonName(question)
         if (personName != null && !roleKeywords.values.flatten().any { personName.contains(it) }) {
-            Log.d(TAG, "👤 PERSON QUERY detected: $personName")
+            Log.d(tag, "👤 PERSON QUERY detected: $personName")
             return QueryAnalysis(
                 intent = QueryIntent.PERSON_QUERY,
                 personName = personName
             )
         }
 
-        Log.d(TAG, "📝 GENERAL QUERY detected")
+        Log.d(tag, "📝 GENERAL QUERY detected")
         return QueryAnalysis(intent = QueryIntent.GENERAL_QUERY)
     }
 
@@ -418,7 +422,7 @@ class OpenAIService {
                 embedding
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Embedding error", e)
+            Log.e(tag, "Embedding error", e)
             emptyList()
         }
     }
@@ -580,14 +584,14 @@ class OpenAIService {
     private suspend fun getRelevantContext(userQuestion: String, analysis: QueryAnalysis): String {
         val cacheKey = userQuestion.lowercase().take(50)
         contextCache[cacheKey]?.let { (cached, time) ->
-            if (System.currentTimeMillis() - time < CACHE_DURATION) {
-                Log.d(TAG, "⚡ Using cache")
+            if (System.currentTimeMillis() - time < cacheDuration) {
+                Log.d(tag, "⚡ Using cache")
                 return cached
             }
         }
 
         return try {
-            Log.d(TAG, "🤖 HYBRID AI search...")
+            Log.d(tag, "🤖 HYBRID AI search...")
 
             val questionEmbedding = getEnhancedEmbedding(userQuestion, analysis)
             if (questionEmbedding.isEmpty()) {
@@ -616,7 +620,7 @@ class OpenAIService {
                             if (docLower.contains(role) ||
                                 (role == "chair" && (docLower.contains("chairperson") || docLower.contains("department head")))) {
                                 boost = 0.6
-                                Log.d(TAG, "🎯 ROLE '$role' found in $docId +BOOST($boost)")
+                                Log.d(tag, "🎯 ROLE '$role' found in $docId +BOOST($boost)")
                             }
                         }
                     }
@@ -624,7 +628,7 @@ class OpenAIService {
                         analysis.personName?.let { name ->
                             if (fuzzyContains(docText, name)) {
                                 boost = 0.4
-                                Log.d(TAG, "🎯 PERSON '$name' found in $docId +BOOST($boost)")
+                                Log.d(tag, "🎯 PERSON '$name' found in $docId +BOOST($boost)")
                             }
                         }
                     }
@@ -635,11 +639,11 @@ class OpenAIService {
 
                 val finalSim = (baseSim + boost).coerceAtMost(1.0)
                 similarities.add(Triple(docId, finalSim, docText))
-                Log.d(TAG, "📊 $docId: ${(finalSim * 100).toInt()}%")
+                Log.d(tag, "📊 $docId: ${(finalSim * 100).toInt()}%")
             }
 
             val topDocs = similarities.sortedByDescending { it.second }.take(3)
-            Log.d(TAG, "🏆 Top: ${topDocs.map { "${it.first}(${(it.second * 100).toInt()}%)" }}")
+            Log.d(tag, "🏆 Top: ${topDocs.map { "${it.first}(${(it.second * 100).toInt()}%)" }}")
 
             val contextSnippets = mutableListOf<Triple<Double, String, String>>()
 
@@ -692,12 +696,12 @@ class OpenAIService {
             val result = context.toString()
             val limited = if (result.length > 6000) result.take(6000) else result
 
-            Log.d(TAG, "✅ Context: ${limited.length} chars")
+            Log.d(tag, "✅ Context: ${limited.length} chars")
             contextCache[cacheKey] = Pair(limited, System.currentTimeMillis())
             limited
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error", e)
+            Log.e(tag, "Error", e)
             "Error accessing database."
         }
     }
@@ -797,26 +801,33 @@ class OpenAIService {
         """.trimIndent()
     }
 
-    suspend fun getChatResponse(userMessage: String): String {
+    suspend fun getChatResponse(userInput: String): String {
         return try {
-            handleCasualConversation(userMessage)?.let { return it }
+            handleCasualConversation(userInput)?.let { return it }
 
-            val analysis = analyzeQuery(userMessage)
-            val context = getRelevantContext(userMessage, analysis)
+            val analysis = analyzeQuery(userInput)
+            val context = getRelevantContext(userInput, analysis)
             val systemPrompt = buildSystemPrompt(context, analysis)
+
+            // Use Message model here
+            val messages = listOf(
+                Message(role = "system", content = systemPrompt),
+                Message(role = "user", content = userInput)
+            )
+
+            // Convert to JSON for API call
+            val messageArray = JSONArray().apply {
+                for (msg in messages) {
+                    put(JSONObject().apply {
+                        put("role", msg.role)
+                        put("content", msg.content)
+                    })
+                }
+            }
 
             val jsonBody = JSONObject().apply {
                 put("model", "gpt-3.5-turbo")
-                put("messages", JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "system")
-                        put("content", systemPrompt)
-                    })
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", userMessage)
-                    })
-                })
+                put("messages", messageArray)
                 put("max_tokens", 1000)
                 put("temperature", 0.3)
             }
@@ -828,7 +839,7 @@ class OpenAIService {
                 .post(body)
                 .build()
 
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
                 val response = client.newCall(request).execute()
                 val responseBody = response.body?.string()
 
@@ -842,15 +853,16 @@ class OpenAIService {
                     .getJSONObject("message")
                     .getString("content")
 
-                Log.d(TAG, "✅ Response ready")
+                Log.d(tag, "✅ Response ready")
                 message.trim()
             }
 
         } catch (e: IOException) {
-            "Network error. Check connection."
+            "Network error. Check your connection."
         } catch (e: Exception) {
-            Log.e(TAG, "Error", e)
+            Log.e(tag, "Error", e)
             "Something went wrong. Try again."
         }
     }
+
 }

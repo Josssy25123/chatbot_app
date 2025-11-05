@@ -17,6 +17,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.chatbotapp.data.ChatMessage
 import com.example.chatbotapp.data.ChatSession
+import com.example.chatbotapp.data.CommandRepository
+import com.example.chatbotapp.data.UserCommand
+import com.example.chatbotapp.data.ReminderEntry
 
 @Composable
 fun ProfessionalChatBubble(message: ChatMessage) {
@@ -177,6 +180,19 @@ fun TypingIndicator() {
     }
 }
 
+suspend fun interceptUserCommand(
+    userInput: String,
+    commandRepo: CommandRepository,
+    onCommandResponse: (String) -> Unit
+): Boolean {
+    val commands = commandRepo.getCommands()
+    val found = commands.find { userInput.trim().startsWith(it.trigger, ignoreCase = true) }
+    return if (found != null) {
+        onCommandResponse(found.response)
+        true
+    } else false
+}
+
 @Composable
 fun ChatHistoryModal(
     chatSessions: List<ChatSession>,
@@ -322,6 +338,7 @@ fun ChatHistoryItem(
                 }
             }
 
+
             IconButton(
                 onClick = onChatDeleted,
                 modifier = Modifier.size(32.dp)
@@ -333,6 +350,8 @@ fun ChatHistoryItem(
                     tint = MaterialTheme.colorScheme.error
                 )
             }
+
+
         }
     }
 }
