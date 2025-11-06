@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "com.example.chatbotapp"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.chatbotapp"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -92,6 +92,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     dependencies {
+        implementation("io.coil-kt:coil-compose:2.6.0")
+        implementation("com.google.firebase:firebase-storage:21.0.0")
         implementation("com.google.firebase:firebase-firestore:24.10.0")
     }
 

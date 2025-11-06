@@ -1,6 +1,7 @@
 package com.example.chatbotapp.models
 
-import androidx.compose.ui.text.intl.Locale
+import java.util.Locale
+import java.util.Date
 import java.text.SimpleDateFormat
 
 data class Message(
